@@ -11,6 +11,7 @@ import {
 import { generateSyntheticDataset, GeneratedDataPackage } from '../data/dataGenerator';
 import { filterAndComputeMetrics, FilteredDataStats } from '../services/kpiEngine';
 import { googleSheetsApi } from '../services/googleSheetsApi';
+import { normalizeSheetRows } from '../services/sheetSchemaAdapter';
 
 interface SavedFilterView {
   id: string;
@@ -207,7 +208,7 @@ export const GlobalFilterProvider: React.FC<{ children: React.ReactNode }> = ({ 
           if (!next) throw new Error('Failed loading ' + sheet + ' page ' + page);
           rows.push(...next.data);
         }
-        return [key, rows] as const;
+        return [key, normalizeSheetRows(sheet, rows)] as const;
       }));
       const next = { ...generateSyntheticDataset(20261010) };
       // Optional datasets are empty rather than synthetic when using a live database.
