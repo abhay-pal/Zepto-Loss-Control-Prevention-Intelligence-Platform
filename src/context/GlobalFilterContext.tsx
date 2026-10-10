@@ -10,6 +10,7 @@ import {
 } from '../types';
 import { generateSyntheticDataset, GeneratedDataPackage } from '../data/dataGenerator';
 import { filterAndComputeMetrics, FilteredDataStats } from '../services/kpiEngine';
+import { googleSheetsApi } from '../services/googleSheetsApi';
 
 interface SavedFilterView {
   id: string;
@@ -43,6 +44,8 @@ interface GlobalContextType {
   regenerateData: (seed?: number) => void;
   refreshData: () => Promise<void>;
   isRefreshing: boolean;
+  dataSource: 'google_sheets' | 'synthetic_demo';
+  syncError: string | null;
   savedViews: SavedFilterView[];
   saveCurrentView: (name: string) => void;
   applySavedView: (view: SavedFilterView) => void;
@@ -85,6 +88,8 @@ export const GlobalFilterProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [dataSource, setDataSource] = useState<'google_sheets' | 'synthetic_demo'>('synthetic_demo');
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const [savedViews, setSavedViews] = useState<SavedFilterView[]>(() => {
     return [
@@ -172,12 +177,57 @@ export const GlobalFilterProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setDataPackage(newPkg);
   };
 
+  // Google Sheets is the source of truth only after the required tables load successfully.
+  // No silent mixing of live and generated records.
   const refreshData = async () => {
     setIsRefreshing(true);
-    await new Promise((res) => setTimeout(res, 800));
-    // Simulate real-time re-sync
-    setIsRefreshing(false);
+    setSyncError(null);
+    try {
+      const ping = await googleSheetsApi.testConnection();
+      if (!ping.success) throw new Error(ping.message);
+      const mapping: Array<[keyof GeneratedDataPackage, string]> = [
+        ['hubs', 'Hub_Master'], ['skus', 'SKU_Master'], ['vendors', 'Vendor_Master'],
+        ['lossEvents', 'Loss_Events'], ['cycleCounts', 'Cycle_Count'],
+        ['grnRecords', 'GRN_Data'], ['transfers', 'Transfer_Data'],
+        ['damageExpiry', 'Damage_Expiry'], ['rcaRecords', 'RCA_Tracker'],
+        ['vendorClaims', 'Vendor_Claims'], ['recoveries', 'Recovery_Data'],
+        ['shifts', 'Shift_Data'], ['alerts', 'Alert_Tracker'],
+        ['actions', 'Action_Tracker'], ['kpiDaily', 'KPI_Daily'],
+        ['inventoryMovements', 'Inventory_Movement'],
+      ];
+      const available = new Set((ping.sheets || []).map(s => s.name));
+      const missing = mapping.filter(([, sheet]) => !available.has(sheet));
+      if (missing.length) throw new Error('Missing required sheets: ' + missing.map(([, s]) => s).join(', '));
+      const entries = await Promise.all(mapping.map(async ([key, sheet]) => {
+        const first = await googleSheetsApi.fetchSheetData(sheet, { page: 1, limit: 1000 });
+        if (!first) throw new Error('Failed loading ' + sheet);
+        const rows = [...first.data];
+        for (let page = 2; page <= first.totalPages; page++) {
+          const next = await googleSheetsApi.fetchSheetData(sheet, { page, limit: 1000 });
+          if (!next) throw new Error('Failed loading ' + sheet + ' page ' + page);
+          rows.push(...next.data);
+        }
+        return [key, rows] as const;
+      }));
+      const next = { ...generateSyntheticDataset(20261010) };
+      // Optional datasets are empty rather than synthetic when using a live database.
+      next.inventorySnapshots = [];
+      next.temperatureLogs = [];
+      for (const [key, rows] of entries) {
+        (next as unknown as Record<string, unknown>)[key] = rows;
+      }
+      next.meta = { ...next.meta, totalRecords: entries.reduce((sum, [, rows]) => sum + rows.length, 0), generatedAt: new Date().toISOString() };
+      setDataPackage(next);
+      setDataSource('google_sheets');
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : String(error));
+      // Retain the current dataset on refresh failure; never claim a live sync.
+    } finally {
+      setIsRefreshing(false);
+    }
   };
+
+  useEffect(() => { void refreshData(); }, []);
 
   const saveCurrentView = (name: string) => {
     const newView: SavedFilterView = {
@@ -234,6 +284,8 @@ export const GlobalFilterProvider: React.FC<{ children: React.ReactNode }> = ({ 
         regenerateData,
         refreshData,
         isRefreshing,
+        dataSource,
+        syncError,
         savedViews,
         saveCurrentView,
         applySavedView,
