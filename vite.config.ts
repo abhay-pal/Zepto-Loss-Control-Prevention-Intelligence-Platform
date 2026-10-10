@@ -5,6 +5,7 @@ import path from 'path'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: '/Zepto-Loss-Control-Prevention-Intelligence-Platform/',
   plugins: [
     react(),
     tailwindcss(),

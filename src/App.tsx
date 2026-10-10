@@ -21,7 +21,7 @@ import { DataExplorer } from './components/modules/DataExplorer';
 import { SettingsAdmin } from './components/modules/SettingsAdmin';
 
 const DashboardContent: React.FC = () => {
-  const { activeTab } = useGlobalFilter();
+  const { activeTab, dataSource, syncError, isRefreshing, refreshData } = useGlobalFilter();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const renderModule = () => {
@@ -65,6 +65,10 @@ const DashboardContent: React.FC = () => {
         {/* Sticky Top Navigation */}
         <TopNav />
 
+        <div className={dataSource === 'google_sheets' ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'} style={{padding:'7px 16px',fontSize:12,display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
+          <span>{dataSource === 'google_sheets' ? 'Live Google Sheets data' : 'SYNTHETIC DEMO DATA — not synced with Google Sheets'}{syncError ? ` · ${syncError}` : ''}</span>
+          <button onClick={() => void refreshData()} disabled={isRefreshing} style={{fontWeight:700,whiteSpace:'nowrap'}}>{isRefreshing ? 'Syncing…' : 'Refresh Data'}</button>
+        </div>
         {/* Scrollable Module Workspace */}
         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-7">
           <div className="max-w-7xl mx-auto">{renderModule()}</div>
